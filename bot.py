@@ -1,56 +1,96 @@
 import telebot
 from telebot import types
-from config import TOKEN
-from search import search_music
-from downloader import download_audio
-from admin import add_user
+import yt_dlp
+import os
 
-bot=telebot.TeleBot(TOKEN)
+TOKEN = "8064305593:AAHI5ytBdKajbpxatcp0nUObQYJD70nB7pE"
 
-results_store={}
+bot = telebot.TeleBot(TOKEN)
 
+search_results = {}
+
+# START
 @bot.message_handler(commands=['start'])
-def start(m):
+def start(message):
+    bot.send_message(message.chat.id,
+        "🎵 Qo'shiq nomini yoz\n"
+        "📥 Yoki YouTube / Instagram / TikTok link yubor")
 
-    add_user(m.chat.id)
+# MAIN
+@bot.message_handler(func=lambda m: True)
+def handle(message):
 
-    bot.send_message(m.chat.id,"🎵 Qo'shiq nomini yoz")
+    text = message.text
 
-@bot.message_handler(func=lambda m:True)
-def music(m):
+    # 🔹 LINK BO'LSA
+    if "youtube.com" in text or "youtu.be" in text or "instagram.com" in text or "tiktok.com" in text:
 
-    results=search_music(m.text)
+        bot.send_message(message.chat.id, "📥 Video yuklanmoqda...")
 
-    results_store[m.chat.id]=results
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': 'video.%(ext)s'
+        }
 
-    msg=""
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(text, download=True)
+                file = ydl.prepare_filename(info)
 
-    keyboard=types.InlineKeyboardMarkup()
+            bot.send_video(message.chat.id, open(file, 'rb'))
+            os.remove(file)
 
-    for i,r in enumerate(results):
+        except:
+            bot.send_message(message.chat.id, "❌ Video yuklab bo‘lmadi")
 
-        msg+=f"{i+1}. {r['title']}\n"
+    # 🔹 QO‘SHIQ NOMI BO'LSA
+    else:
+        bot.send_message(message.chat.id, "🔎 Qidirilmoqda...")
 
-        keyboard.add(
-            types.InlineKeyboardButton(
-                str(i+1),
-                callback_data=str(i)
-            )
-        )
+        try:
+            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                info = ydl.extract_info(f"ytsearch10:{text}", download=False)
 
-    bot.send_message(m.chat.id,msg,reply_markup=keyboard)
+            results = info['entries']
+            search_results[message.chat.id] = results
 
-@bot.callback_query_handler(func=lambda call:True)
+            msg = "🎧 Natijalar:\n\n"
+            keyboard = types.InlineKeyboardMarkup()
+
+            for i, r in enumerate(results):
+                msg += f"{i+1}. {r['title']}\n"
+                keyboard.add(types.InlineKeyboardButton(str(i+1), callback_data=str(i)))
+
+            bot.send_message(message.chat.id, msg, reply_markup=keyboard)
+
+        except:
+            bot.send_message(message.chat.id, "❌ Qidirishda xatolik")
+
+# 🔹 TUGMA BOSILGANDA
+@bot.callback_query_handler(func=lambda call: True)
 def download(call):
 
-    results=results_store.get(call.message.chat.id)
+    try:
+        index = int(call.data)
+        results = search_results.get(call.message.chat.id)
 
-    url=results[int(call.data)]['webpage_url']
+        url = results[index]['webpage_url']
 
-    bot.send_message(call.message.chat.id,"⬇️ Yuklanmoqda...")
+        bot.send_message(call.message.chat.id, "🎧 Yuklanmoqda...")
 
-    file=download_audio(url)
+        ydl_opts = {
+            'format': 'bestaudio',
+            'outtmpl': 'song.%(ext)s'
+        }
 
-    bot.send_audio(call.message.chat.id,open(file,'rb'))
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file = ydl.prepare_filename(info)
+
+        bot.send_audio(call.message.chat.id, open(file, 'rb'))
+        os.remove(file)
+
+    except:
+        bot.send_message(call.message.chat.id, "❌ Yuklab bo‘lmadi")
 
 bot.infinity_polling()
